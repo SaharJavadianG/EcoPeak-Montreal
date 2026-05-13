@@ -45,6 +45,7 @@ This prototype runs on **synthetically generated data** designed to simulate Mon
 | Anomaly Detection | Scikit-Learn (Isolation Forest) |
 | Data Pipeline | Pandas & NumPy on 1-hour interval meter data |
 | Visualization | Matplotlib |
+| AI collaboration | Mainly used for code generation & UI structure |
 
 ---
 
