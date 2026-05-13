@@ -162,7 +162,7 @@ if df_raw is not None:
             history_load.append(p)
         
         # Plotting the predicted week
-        f_times = pd.date_range(df['Date and Time'].max(), periods=len(preds)+1, freq='H')[1:]
+        f_times = pd.date_range(df['Date and Time'].max(), periods=len(preds)+1, freq='h')[1:]
         fig_f, ax_f = plt.subplots(figsize=(14, 6))
         ax_f.plot(f_times, preds, color='#912338', label="Predicted Consumption")
         ax_f.axhline(contract_limit, color='red', linestyle=':', label="Penalty Limit")
