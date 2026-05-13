@@ -60,11 +60,11 @@ streamlit run app.py
 ---
 
 ### 🎓 Academic Context
-Developed as a 2026 update to my M.Sc. research on ML-driven demand response in commercial buildings — originally prototyped with LSTM in 2019, now rebuilt for real-world deployment readiness.
+Developed as a 2026 update to my M.Sc. research on ML-driven demand response in commercial buildings, originally prototyped with LSTM in 2019, now rebuilt for real-world deployment readiness.
+📖 **Read the Full Thesis:** https://www.concordia.ca/content/dam/research/chairs/smart-cities/docs/thesis-sahar-javedian.pdf
 
-🔗 **Live Demo:** *Coming soon on Hugging Face Spaces*
+🔗 **Live Demo:** https://saharjv-building-energy-dss.hf.space
 
 
-A spike at 7am Monday looks identical in kW to a heat wave response — but they require completely different interventions. The diagnostic layer separates them.
 
 ---
