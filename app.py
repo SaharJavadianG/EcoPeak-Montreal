@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import xgboost as xgb
 from sklearn.ensemble import IsolationForest
+from sklearn.metrics import mean_absolute_percentage_error
 import os
 
 #APP SETUP & THEME
@@ -19,25 +20,26 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Keep the model in memory so it doesn't retrain on every click
+# Keep model and metrics in memory
 if 'model' not in st.session_state:
     st.session_state.model = None
+if 'mape' not in st.session_state:
+    st.session_state.mape = 0.0
+if 'accuracy' not in st.session_state:
+    st.session_state.accuracy = 0.0
 
 # SIDEBAR: USER INPUTS 
 st.sidebar.header("📋 App Settings")
-# The 1650kW limit is based on the building's specific utility contract
-contract_limit = st.sidebar.number_input("Current Contract Limit (kW)", value=1650.0)
+contract_limit = st.sidebar.number_input("Current Contract Limit (kW)", value=1500.0)
 demand_rate = 18.20 
 uploaded_file = st.sidebar.file_uploader("Upload New Load Data (.csv or .xlsx)", type=["csv", "xlsx"])
 
 # --- DATA CLEANING FUNCTIONS ---
 def prepare_data(df):
-    # Clean up column names and handle naming variations
     df.columns = df.columns.str.strip()
     if 'Electricity Load (kW)' in df.columns:
         df = df.rename(columns={'Electricity Load (kW)': 'Electricity Load'})
     
-    # Standardizing time and extracting features for ML
     df['Date and Time'] = pd.to_datetime(df['Date and Time'])
     df['Hour'] = df['Date and Time'].dt.hour
     df['DayOfWeek_Num'] = df['Date and Time'].dt.dayofweek
@@ -45,29 +47,35 @@ def prepare_data(df):
     df['Month'] = df['Date and Time'].dt.month_name()
     df['Month_Num'] = df['Date and Time'].dt.month
     
-    # Adding 'Lag' features so the model can see previous consumption patterns
     df['load_lag_24h'] = df['Electricity Load'].shift(24)
     df['load_lag_1h'] = df['Electricity Load'].shift(1)
     return df.dropna().reset_index(drop=True)
 
 def train_xgb(df):
-    # Training the XGBoost regressor using time and temperature as main drivers
     features = ['Hour', 'DayOfWeek_Num', 'Month_Num', 'Temperature', 'load_lag_24h', 'load_lag_1h']
     X = df[features]
     y = df['Electricity Load']
+    
+    split = int(len(df) * 0.8)
+    X_train, X_test = X.iloc[:split], X.iloc[split:]
+    y_train, y_test = y.iloc[:split], y.iloc[split:]
+    
     model = xgb.XGBRegressor(n_estimators=300, max_depth=6, learning_rate=0.05, objective='reg:squarederror')
-    model.fit(X, y)
+    model.fit(X_train, y_train)
+    
+    preds_test = model.predict(X_test)
+    mape_val = mean_absolute_percentage_error(y_test, preds_test) * 100
+    
     st.session_state.model = model
+    st.session_state.mape = round(mape_val, 2)
+    st.session_state.accuracy = round(100 - mape_val, 2)
     return model
 
 # --- DATA LOADING LOGIC ---
 df_raw = None
-
 if uploaded_file is not None:
-    # Handle user-provided data
     df_raw = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
 else:
-    # Default to the thesis benchmark file if no file is uploaded
     default_path = "data/benchmark_data.csv"
     if os.path.exists(default_path):
         df_raw = pd.read_csv(default_path)
@@ -82,14 +90,11 @@ if df_raw is not None:
     st.markdown("### 📊 Operational Overview")
     tab1, tab2, tab3, tab4 = st.tabs(["Energy Patterns", "Cost Analysis", "7-Day Prediction", "Problem Diagnosis"])
 
-    # Tab 1: Visualizing the difference between workdays and weekends
     with tab1:
         st.header("Behavioral Energy Signatures")
         df['is_weekend'] = df['DayOfWeek_Num'] >= 5
         wd_avg = df[df['is_weekend'] == False].groupby('Hour')['Electricity Load'].mean()
         we_avg = df[df['is_weekend'] == True].groupby('Hour')['Electricity Load'].mean()
-        
-        # Keep scales identical so comparisons are fair
         global_y_max = max(wd_avg.max(), we_avg.max()) * 1.1 
         
         c1, c2 = st.columns(2)
@@ -102,7 +107,6 @@ if df_raw is not None:
             ax_wd.set_ylabel("Load (kW)")
             ax_wd.grid(True, alpha=0.2)
             st.pyplot(fig_wd); plt.close(fig_wd)
-            
         with c2:
             fig_we, ax_we = plt.subplots(figsize=(6, 4))
             ax_we.plot(we_avg.index, we_avg.values, color='#ffb81c', linewidth=2)
@@ -113,7 +117,6 @@ if df_raw is not None:
             ax_we.grid(True, alpha=0.2)
             st.pyplot(fig_we); plt.close(fig_we)
 
-    # Tab 2: Calculating peak demand penalties
     with tab2:
         st.header("Financial Penalty Audit")
         billing_results = []
@@ -121,22 +124,17 @@ if df_raw is not None:
             m_data = df[df['Month'] == month]
             m_peak = m_data['Electricity Load'].max()
             m_gap = max(0, m_peak - contract_limit)
-            billing_results.append({
-                "Month": month, 
-                "Peak (kW)": round(m_peak, 2), 
-                "Penalty ($)": round(m_gap * demand_rate, 2)
-            })
+            billing_results.append({"Month": month, "Peak (kW)": round(m_peak, 2), "Penalty ($)": round(m_gap * demand_rate, 2)})
             
             fig_p, ax_p = plt.subplots(figsize=(12, 2.5))
             ax_p.plot(m_data['Date and Time'], m_data['Electricity Load'], color='#2E86C1', alpha=0.6)
             ax_p.axhline(contract_limit, color='red', linestyle='--', label="Contract Limit")
             ax_p.set_title(f"Monthly Distribution: {month}")
+            ax_p.set_ylabel("Load (kW)")
             st.pyplot(fig_p); plt.close(fig_p)
-            
         st.subheader("Billing Summary")
         st.table(pd.DataFrame(billing_results))
 
-    # Tab 3: Running the XGBoost forecast
     with tab3:
         st.header("XGBoost Load Forecast (Next 168 Hours)")
         if st.session_state.model is None: 
@@ -144,25 +142,20 @@ if df_raw is not None:
 
         m_col1, m_col2, m_col3 = st.columns(3)
         with m_col1:
-            st.metric("Model Architecture", "XGBoost")
+            st.metric("Model", "XGBoost")
         with m_col2:
-            st.metric("Primary Metric", "RMSE")
+            st.metric("Error Rate (MAPE)", f"{st.session_state.mape}%")
         with m_col3:
-            st.metric("Objective Function", "reg:squarederror")
+            st.metric("Forecast Accuracy", f"{st.session_state.accuracy}%")
+            
+        st.info("**Note:** This demo runs on synthetically generated data designed to simulate Montreal commercial building load profiles. A production deployment would connect to real Hydro-Québec interval meter data.")
             
         history_load = df['Electricity Load'].tolist()
         last_time = df['Date and Time'].max()
         preds = []
         for _ in range(168): 
             last_time += pd.Timedelta(hours=1)
-            cur_feat = pd.DataFrame([{
-                'Hour': last_time.hour, 
-                'DayOfWeek_Num': last_time.dayofweek, 
-                'Month_Num': last_time.month, 
-                'Temperature': df['Temperature'].mean(), 
-                'load_lag_24h': history_load[-24], 
-                'load_lag_1h': history_load[-1]
-            }])
+            cur_feat = pd.DataFrame([{'Hour': last_time.hour, 'DayOfWeek_Num': last_time.dayofweek, 'Month_Num': last_time.month, 'Temperature': df['Temperature'].mean(), 'load_lag_24h': history_load[-24], 'load_lag_1h': history_load[-1]}])
             p = st.session_state.model.predict(cur_feat)[0]
             preds.append(p)
             history_load.append(p)
@@ -175,18 +168,36 @@ if df_raw is not None:
         ax_f.legend()
         st.pyplot(fig_f); plt.close(fig_f)
 
-    # Tab 4: Using Isolation Forest to find unusual events
     with tab4:
         st.header("Automated Anomaly Diagnostic")
         iso = IsolationForest(contamination=0.015, random_state=42)
         df['anomaly'] = iso.fit_predict(df[['Electricity Load', 'Temperature', 'Hour', 'DayOfWeek_Num']])
         anomalies = df[df['anomaly'] == -1].copy()
         
+        # Benchmarking values for smarter diagnostic logic
         t_mean = df['Temperature'].mean()
+        load_mean = df['Electricity Load'].mean()
+
         def diagnose(row):
-            if abs(row['Temperature'] - t_mean) > 8: return "Weather-Related (HVAC Stress)"
-            elif 6 <= row['Hour'] <= 9 and row['DayOfWeek_Num'] < 5: return "Morning Startup Spike"
-            else: return "Unknown/Technical Fault"
-        
+            # 1. Temperature-Driven Anomalies
+            if abs(row['Temperature'] - t_mean) > 8: 
+                return "Weather-Related (HVAC Stress)"
+            
+            # 2. Occupancy/Human Existence Patterns
+            # Morning spikes on weekdays
+            if 6 <= row['Hour'] <= 9 and row['DayOfWeek_Num'] < 5: 
+                return "Morning Startup (Occupancy Rise)"
+            # Evening/Night Low Loads (likely what row 810/811 were hitting)
+            if (row['Hour'] >= 18 or row['Hour'] <= 5) and row['Electricity Load'] < (load_mean * 0.5):
+                return "Off-Hours Low Load (Normal Lull)"
+            # Weekend Patterns
+            if row['DayOfWeek_Num'] >= 5 and row['Electricity Load'] < (load_mean * 0.7):
+                return "Weekend Pattern (Reduced Presence)"
+            
+            # 3. If none of the above, and it's a statistical outlier, label as fault
+            return "Unexpected Technical Anomaly"
+
         anomalies['Root Cause Hint'] = anomalies.apply(diagnose, axis=1)
+        
+        st.info("The diagnostics below identify deviations from the baseline building signature. Note: Historical benchmarks use 2019 data profiles.")
         st.dataframe(anomalies[['Date and Time', 'Electricity Load', 'Temperature', 'Root Cause Hint']].sort_values(by='Date and Time'))
