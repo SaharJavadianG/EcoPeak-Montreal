@@ -1,0 +1,32 @@
+# --- Python & Virtual Environments ---
+# We don't upload these because they are huge; 
+# GitHub will rebuild them from requirements.txt
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# --- Streamlit ---
+# Ignores internal Streamlit settings
+.streamlit/
+
+# --- Data Strategy (Critical for your Thesis) ---
+# 1. Ignore all CSV and Excel files by default for privacy
+*.csv
+*.xlsx
+*.parquet
+
+# 2. THE EXCEPTION: Allow the specific benchmark file your app needs
+!data/benchmark_data.csv
+
+# --- Operating System & IDEs ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.cursor/
+
+# --- Docker ---
+.docker/
